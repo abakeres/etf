@@ -24,3 +24,4 @@ A Python tool that analyzes and compares ETF holdings, overlap, and sector alloc
 - pandas
 - yfinance
 - openpyxl
+- matplotlib
