@@ -20,8 +20,7 @@ A Python tool that analyzes and compares ETF holdings, overlap, and sector alloc
 5. Open etf_comparison.xlsx to view the report
 
 ## Tech used
-- Python
+- python
 - pandas
 - yfinance
 - openpyxl
--
