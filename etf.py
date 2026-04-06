@@ -1,7 +1,10 @@
 import pandas as pd
 import yfinance as yf
+import matplotlib.pyplot as plt
+import io
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
+from openpyxl.drawing.image import Image
 
 user_input = input("Enter ETF tickers seperated by commas (e.g. SPY,QQQ,VTI):")
 
@@ -144,6 +147,25 @@ with pd.ExcelWriter("etf_comparison.xlsx", engine="openpyxl") as writer:
         row += 1
 
     ws_summary.column_dimensions["A"].width = 70
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sector_df_chart = pd.DataFrame(sector_data). fillna(0)
+    sector_df_chart.plot(kind="bar", ax=ax)
+    ax.set_title("Sector Allocation by ETF")
+    ax.set_xlabel("Sector")
+    ax.set_ylabel("Weight (%)")
+    ax.legend(title="ETF")
+    plt.xticks(rotation=45, ha="right")
+    plt.tight_layout()
+
+    img_bytes = io.BytesIO()
+    plt.savefig(img_bytes, format="png")
+    img_bytes.seek(0)
+    plt.close()
+
+    ws_chart = workbook.create_sheet("Charts")
+    img = Image(img_bytes)
+    ws_chart.add_image(img, "A1")
 
     for sheet_name in ["Holdings", "Overlap", "Sectors"]:
         ws = workbook[sheet_name]
