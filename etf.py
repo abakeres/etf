@@ -64,6 +64,21 @@ for etf in etfs:
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
+print("\nPulling performance data...")
+
+performance_data = {}
+
+for etf in etfs:
+    ticker = yf.Ticker(etf)
+    hist = ticker.history(period="1y")
+    hist = hist[["Close"]]
+    hist.index = hist.index.tz_localize(None)
+
+    hist["Normalized"] = (hist["Close"] / hist["Close"].iloc[0]) * 100
+    performance_data[etf] = hist
+    total_return = ((hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0]) * 100
+    print(f"    {etf}: {total_return:.1f}% return over past year")
+
 print("\nExporting to Excel...")
 
 with pd.ExcelWriter("etf_comparison.xlsx", engine="openpyxl") as writer:
@@ -166,6 +181,23 @@ with pd.ExcelWriter("etf_comparison.xlsx", engine="openpyxl") as writer:
     ws_chart = workbook.create_sheet("Charts")
     img = Image(img_bytes)
     ws_chart.add_image(img, "A1")
+
+    fig2, ax2 = plt.subplots(figsize=(12, 6))
+    for etf in etfs:
+        performance_data[etf]["Normalized"].plot(ax=ax2, label=etf)
+    ax2.set_title("1 Year Price Performance (Normalized to 100)")
+    ax2.set_xlabel("Date")
+    ax2.set_ylabel("Value (Starting at 100)")
+    ax2.legend(title="ETF")
+    plt.tight_layout()
+
+    img_bytes2 = io.BytesIO()
+    plt.savefig(img_bytes2, format="png")
+    img_bytes2.seek(0)
+    plt.close()
+
+    img2 = Image(img_bytes2)
+    ws_chart.add_image(img2, "A22")
 
     for sheet_name in ["Holdings", "Overlap", "Sectors"]:
         ws = workbook[sheet_name]
