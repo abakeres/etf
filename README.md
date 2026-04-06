@@ -7,6 +7,7 @@ A Python tool that analyzes and compares ETF holdings, overlap, and sector alloc
 - Calculates overlap between each pair of ETFs by stock count and weight
 - Breaks down sector allocation for each ETF
 - Generates a bar chart comparing sector allocations across all ETFs
+- Generates a line chart comparing 1 year performance across all ETFs
 - Exports a formatted Excel report with 4 tabs: Summary, Holdings, Overlap, Sectors, and Charts
 
 ## How to run it
