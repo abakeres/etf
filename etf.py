@@ -1,5 +1,7 @@
 import pandas as pd
 import yfinance as yf
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 user_input = input("Enter ETF tickers seperated by commas (e.g. SPY,QQQ,VTI):")
 
@@ -56,6 +58,9 @@ for etf in etfs:
     for sector, weight in sorted(cleaned.items(), key=lambda x: x[1], reverse=True):
         print(f"    {sector}: {weight}%")
 
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
+
 print("\nExporting to Excel...")
 
 with pd.ExcelWriter("etf_comparison.xlsx", engine="openpyxl") as writer:
@@ -90,5 +95,66 @@ with pd.ExcelWriter("etf_comparison.xlsx", engine="openpyxl") as writer:
     sector_df = pd.DataFrame(sector_data).fillna(0)
     sector_df.index.name = "Sector"
     sector_df.to_excel(writer, sheet_name="Sectors")
+
+    workbook = writer.book
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="1F4E79")
+    center = Alignment(horizontal="center")
+
+    ws_summary = workbook.create_sheet("Summary", 0)
+
+    ws_summary["A1"] = "ETF Comparison Summary"
+    ws_summary["A1"].font = Font(bold=True, size=16, color="1F4E79")
+    ws_summary["A2"] = f"ETFS Analyzed: {', '.join(etfs)}"
+    ws_summary["A2"].font = Font(italic=True, size=11)
+    ws_summary["A3"] = ""
+
+    row = 4
+
+    ws_summary.cell(row=row, column=1, value="Top Holding in ETF").font = Font(bold=True, size=12)
+    row += 1
+    for etf in etfs:
+        top = all_holdings[etf].iloc[0]
+        ws_summary.cell(row=row, column=1, value=f"{etf}: {top['Name']} ({top['Weight']:.1%})")
+        row += 1
+
+    row += 1
+
+    ws_summary.cell(row=row, column=1, value="Larget Sector per ETF").font = Font(bold=True, size=12)
+    row += 1
+    for etf in etfs:
+        top_sector = max(sector_data[etf], key=sector_data[etf].get)
+        top_weight = sector_data[etf][top_sector]
+        ws_summary.cell(row=row, column=1, value=f"{etf}: {top_sector} ({top_weight}%)")
+        row += 1
+
+    row += 1
+
+    ws_summary.cell(row=row, column=1, value="Overlap Analysis").font = Font(bold=True, size=12)
+    row += 1
+    for i in range(len(etf_list)):
+        etf1 = etf_list[i]
+        etf2 = etf_list[j]
+        tickers1 = set(all_holdings[etf1]["Ticker"])
+        tickers2 = set(all_holdings[etf2]["Ticker"])
+        overlap = tickers1.intersection(tickers2)
+        weight1 = all_holdings[etf1][all_holdings[etf1]["Ticker"].isin(overlap)]["Weight"].sum()
+        weight2 = all_holdings[etf2][all_holdings[etf2]["Ticker"].isin(overlap)]["Weight"].sum()
+        ws_summary.cell(row=row, column=1, value=f"{etf} vs {etf2}: {len(overlap)} stocks in common - {weight1:.1%} of {etf1}, {weight2:.1%} of {etf2}")
+        row += 1
+
+    ws_summary.column_dimensions["A"].width = 70
+
+    for sheet_name in ["Holdings", "Overlap", "Sectors"]:
+        ws = workbook[sheet_name]
+
+        for cell in ws[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center
+
+        for col in ws.columns:
+            max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 4
 
 print("Done! File saved as etf_comparison.xlsx")
