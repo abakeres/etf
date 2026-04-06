@@ -19,14 +19,9 @@ A Python tool that analyzes and compares ETF holdings, overlap, and sector alloc
 4. Enter ETF tickers when prompted (e.g. SPY,QQQ,VTI)
 5. Open etf_comparison.xlsx to view the report
 
-## Example insights
-- QQQ is 50% Technology — nearly double SPY and VTI
-- SPY and VTI share 100% of their top 10 holdings, making them largely redundant in a portfolio
-- QQQ has almost no Financial Services exposure (0.23%) vs SPY and VTI at ~12%
-
 ## Tech used
 - Python
 - pandas
 - yfinance
 - openpyxl
-- matplotlib
+-
