@@ -177,7 +177,7 @@ def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financ
         fig2, ax2 = plt.subplots(figsize=(12, 6))
         for ticker in tickers:
             performance_data[ticker]["Normalized"].plot(ax=ax2, label=ticker)
-        ax2.set_title("1 Year Price Performance (Nomalized to 100)")
+        ax2.set_title("1 Year Price Performance (Normalized to 100)")
         ax2.set_xlabel("Date")
         ax2.set_ylabel("Value (Starting at 100)")
         ax2.legend(title="Stock")
