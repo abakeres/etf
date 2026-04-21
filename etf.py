@@ -29,6 +29,7 @@ def get_key_metrics(stock_data):
         "Shares Outstanding": "sharesOutstanding",
         "Float": "float",
         "Short % of Float": "shortPercentOfFloat",
+        "Analyst Price Target": "targetMeanPrice"
     }
 
     rows = []
@@ -37,6 +38,17 @@ def get_key_metrics(stock_data):
         for ticker in stock_data:
             row[ticker] = stock_data[ticker].get(key, "N/A")
         rows.append(row)
+
+    upside_row = {"Metric": "Upside/Downside"}
+    for ticker in stock_data:
+        price = stock_data[ticker].get("currentPrice", None)
+        target = stock_data[ticker].get("targetMeanPrice", None)
+        if price and target:
+            pct = ((target - price) / price) *100
+            upside_row[ticker] = f"{pct:+.1f}%"
+        else:
+            upside_row[ticker] = "N/A"
+    rows.append(upside_row)
     
     return pd.DataFrame(rows)
 
@@ -113,7 +125,7 @@ def get_analyst_ratings(tickers):
         df["Total"] = df[["Strong Buy", "Buy", "Hold", "Underperform", "Sell"]].apply(pd.to_numeric, errors="coerce").sum(axis=1)
     return df
 
-def get_flags(tickers, stock_data):
+def get_flags(tickers, stock_data, technicals, earnings_trends):
     flags = []
 
     for ticker in tickers:
@@ -142,7 +154,7 @@ def get_flags(tickers, stock_data):
             if pe > 50:
                 flags.append({"Ticker": ticker, "Metric": "P/E Ratio", "Value": f"{pe:.1f}", "Flag": f"P/E of {pe:.1f} is significantly above market average - potentially overvalued", "Severity": "Warning"})
             elif pe < 0:
-                flags.append({"Ticker": ticker, "Metric": "P/E Ratio", "Value": f"{pe:.1f}", "Flag": "Negative P/E - comapny is currently unprofitable", "Severity": "Warning"})
+                flags.append({"Ticker": ticker, "Metric": "P/E Ratio", "Value": f"{pe:.1f}", "Flag": "Negative P/E - company is currently unprofitable", "Severity": "Warning"})
 
         peg = info.get("pegRatio", None)
         if peg is not None and peg > 2:
@@ -160,11 +172,21 @@ def get_flags(tickers, stock_data):
 
         short_pct = info.get("shortPercentOfFloat", None)
         if short_pct is not None and short_pct > 0.20:
-            flags.append({"Ticker": ticker, "Metric": "Short % of Float", "Value": f"{short_pct:.1%}", "Flag": f"{short_pct:.1%} of loat is shorted - heavily shorted, elevated risk", "Severity": "Warning"})
+            flags.append({"Ticker": ticker, "Metric": "Short % of Float", "Value": f"{short_pct:.1%}", "Flag": f"{short_pct:.1%} of float is shorted - heavily shorted, elevated risk", "Severity": "Warning"})
 
         beta = info.get("beta", None)
         if beta is not None and beta > 2:
-            flags.append({"Ticker": ticker, "Metric": "Beta", "Value": f"{beta:.2f}", "Flag": f"Beta of {beta:.2f} indiccates high volitility relative to market", "Severity": "Caution"})
+            flags.append({"Ticker": ticker, "Metric": "Beta", "Value": f"{beta:.2f}", "Flag": f"Beta of {beta:.2f} indicates high volitility relative to market", "Severity": "Caution"})
+        
+        rsi = technicals.get(ticker, {}).get("rsi", None)
+        if rsi is not None:
+            if rsi > 70:
+                flags.append({"Ticker": ticker, "Metric": "RSI", "Value": f"{rsi:.1f}", "Flag": f"RSI of {rsi:.1f} - overbought territory", "Severity": "Caution"})
+            elif rsi < 30:
+                flags.append({"Ticker": ticker, "Metric": "RSI", "Value": f"{rsi:.1f}", "Flag": f"RSI of {rsi:.1f} - oversold territory", "Severity": "Caution"})
+        trend = earnings_trends.get(ticker, None)
+        if trend and trend["declines"] >= 2:
+            flags.append({"Ticker": ticker, "Metric": "Earnings Trend", "Value": f"{trend['declines']} declining qtrs", "Flag": f"EPS had declined {trend['declines']} consecutive quarters - watch for deteriorating fundamentals", "Severity": "Warning"})
     if not flags:
         flags.append({"Ticker": "All", "Metric": "-", "Value": "-", "Flag": "No major flags detected across all stocks", "Severity": "OK"})
 
@@ -183,7 +205,42 @@ def get_stock_performance(tickers):
         print(f"    {ticker}: {total_return:.1f}% return over past year")
     return performance_data
 
-def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, flags_df, performance_df):
+def calculate_technicals(tickers):
+    technicals = {}
+    for ticker in tickers:
+        try:
+            t = yf.Ticker(ticker)
+            hist = t.history(period="1y")["Close"]
+            ma50 = hist.rolling(50).mean().iloc[-1]
+            ma200 = hist.rolling(200).mean().iloc[-1]
+            delta = hist.diff()
+            gain = delta.clip(lower=0).rolling(14).mean()
+            loss = (-delta.clip(upper=0)).rolling(14).mean()
+            rs = gain/loss
+            rsi = (100 -(100 / (1 + rs))).iloc[-1]
+            technicals[ticker] = {"ma50": ma50, "ma200": ma200, "rsi": rsi, "hist": hist}
+        except Exception:
+            technicals[ticker] = {"ma50": None, "ma200": None, "rsi": None, "hist": None}
+    return technicals
+
+def get_earnings_trend(tickers):
+    trends = {}
+    for ticker in tickers:
+        try:
+            t = yf.Ticker(ticker)
+            income = t.quarterly_income_stmt
+            if income is None or income.empty:
+                trends[ticker] = None
+                continue
+            eps_row = income.loc["Net Income"]
+            eps = eps_row.iloc[:4].values
+            declines = sum(1 for i in range(1, len(eps)) if eps[i] < eps[i-1])
+            trends[ticker] = {"eps": eps, "declines": declines}
+        except Exception:
+            trends[ticker] = None
+    return trends
+
+def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, flags_df, performance_data, technicals):
     print("\nExporting to Excel...")
 
     with pd.ExcelWriter("stock_comparison.xlsx", engine="openpyxl") as writer:
@@ -236,6 +293,11 @@ def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financ
         fig2, ax2 = plt.subplots(figsize=(12, 6))
         for ticker in tickers:
             performance_data[ticker]["Normalized"].plot(ax=ax2, label=ticker)
+            hist = technicals.get(ticker, {}).get("hist", None)
+            if hist is not None:
+                norm_base = performance_data[ticker]["Close"].iloc[0]
+                (hist.rolling(50).mean() / norm_base * 100).plot(ax=ax2, linestyle="--", alpha=0.6, label=f"{ticker} 50MA")
+                (hist.rolling(200).mean() / norm_base * 100).plot(ax=ax2, linestyle=":", alpha=0.6, label=f"{ticker} 200MA")
         ax2.set_title("1 Year Price Performance (Normalized to 100)")
         ax2.set_xlabel("Date")
         ax2.set_ylabel("Value (Starting at 100)")
@@ -312,7 +374,7 @@ if mode == "etf":
 
             print(f"{etf1} vs {etf2}: {overlap_count} stocks in common")
             print(f"    Overlap weight in {etf1}: {weight1:.1%}")
-            print(f"    Overlap weigth in {etf2}: {weight2:.1%}")
+            print(f"    Overlap weight in {etf2}: {weight2:.1%}")
 
     print("\nSector Allocation:")
 
@@ -403,7 +465,7 @@ if mode == "etf":
 
         row += 1
 
-        ws_summary.cell(row=row, column=1, value="Larget Sector per ETF").font = Font(bold=True, size=12)
+        ws_summary.cell(row=row, column=1, value="Largest Sector per ETF").font = Font(bold=True, size=12)
         row += 1
         for etf in tickers:
             top_sector = max(sector_data[etf], key=sector_data[etf].get)
@@ -489,16 +551,23 @@ if mode == "stock":
 
     print("Building Valuation...")
     valuation_df = get_valuation(stock_data)
+
     print("Building Financials...")
     financials_df = get_financials(stock_data)
 
     print("Fetching Analyst Ratings...")
     analyst_df = get_analyst_ratings(tickers)
 
-    print("Running Flag Analysis...")
-    flags_df = get_flags(tickers, stock_data)
-
     print("Fetching Performance Data...")
     performance_data = get_stock_performance(tickers)
 
-    export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, flags_df, performance_data)
+    print("Calculating Technicals...")
+    technicals = calculate_technicals(tickers)
+
+    print("Analysing Earnings Trend...")
+    earnings_trend = get_earnings_trend(tickers)
+
+    print("Running Flag Analysis...")
+    flags_df = get_flags(tickers, stock_data, technicals, earnings_trend)
+
+    export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, flags_df, performance_data, technicals)
