@@ -113,48 +113,6 @@ def get_analyst_ratings(tickers):
         df["Total"] = df[["Strong Buy", "Buy", "Hold", "Underperform", "Sell"]].apply(pd.to_numeric, errors="coerce").sum(axis=1)
     return df
 
-def get_news(tickers):
-    import anthropic
-    from newspaper import Article
-
-    client = anthropic.Anthropic()
-    rows = []
-
-    for ticker in tickers:
-        t = yf.Ticker(ticker)
-        news = t.news[:5]
-
-        for article in news:
-            url = article.get("link", "")
-            headline = article.get("title", "N/A")
-            source = article.get("publisher", "N/A")
-            published = pd.to_datetime(article.get("providerPublishTime", 0), unit="s").strftime("%Y-%m-%d")
-
-            try:
-                a = Article(url)
-                a.download()
-                a.parse()
-                article_text = a.text[:3000]
-
-                response = client.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=300,
-                    messages=[{"role": "user", "content": f"Summarize this article in a short paragraph: {article_text}"}]
-                )
-                summary = response.content[0].text
-            except:
-                summary = "Could not fetch article"
-
-            rows.append({
-                "Ticker": ticker,
-                "Headline": headline,
-                "Source": source,
-                "Date": published,
-                "URL": url,
-                "Summary": summary
-            })
-    return pd.DataFrame(rows)
-
 def get_stock_performance(tickers):
     performance_data = {}
     for ticker in tickers:
@@ -168,7 +126,7 @@ def get_stock_performance(tickers):
         print(f"    {ticker}: {total_return:.1f}% return over past year")
     return performance_data
 
-def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, news_df, performance_df):
+def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, performance_df):
     print("\nExporting to Excel...")
 
     with pd.ExcelWriter("stock_comparison.xlsx", engine="openpyxl") as writer:
@@ -181,14 +139,12 @@ def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financ
 
         analyst_df.to_excel(writer, sheet_name="Analyst Ratings", index=False)
 
-        news_df.to_excel(writer, sheet_name="News", index=False)
-
         workbook = writer.book
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill("solid", fgColor="1F4E79")
         center = Alignment(horizontal="center")
 
-        for sheet_name in ["Key Metrics", "Valuation", "Financials", "Analyst Ratings", "News"]:
+        for sheet_name in ["Key Metrics", "Valuation", "Financials", "Analyst Ratings"]:
             ws = workbook[sheet_name]
             for cell in ws[1]:
                 cell.font = header_font
@@ -197,20 +153,7 @@ def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financ
             for col in ws.columns:
                 max_len = max(len(str(cell.value)) if cell.value else 0 for cell in col)
                 ws.column_dimensions[get_column_letter(col[0].column)].width = max_len + 4
-            
-        ws_news = workbook["News"]
-        url_col = None
-        for cell in ws_news[1]:
-            if cell.value =="URL":
-                url_col = cell.column
-                break
-        if url_col:
-            for row in range(2, ws_news.max_row +1):
-                cell = ws_news.cell(row=row, column=url_col)
-                if cell.value:
-                    cell.hyperlink = cell.value
-                    cell.font = Font(color="0000FF", underline="single")
-
+    
         fig, ax = plt.subplots(figsize=(10, 6))
         rating_cols = ["Strong Buy", "Buy", "Hold", "Underperform", "Sell"]
         analyst_chart_df = analyst_df.set_index("Ticker")[rating_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
@@ -475,10 +418,7 @@ if mode == "stock":
     print("Fetching Analyst Ratings...")
     analyst_df = get_analyst_ratings(tickers)
 
-    print("Fetching News and Summarizing...")
-
-    news_df = get_news(tickers)
     print("Fetching Performance Data...")
     performance_data = get_stock_performance(tickers)
 
-    export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, news_df, performance_data)
+    export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, performance_data)
