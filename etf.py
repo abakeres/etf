@@ -113,6 +113,63 @@ def get_analyst_ratings(tickers):
         df["Total"] = df[["Strong Buy", "Buy", "Hold", "Underperform", "Sell"]].apply(pd.to_numeric, errors="coerce").sum(axis=1)
     return df
 
+def get_flags(tickers, stock_data):
+    flags = []
+
+    for ticker in tickers:
+        info = stock_data[ticker]
+
+        market_cap = info.get("marketCap", None)
+        current_price = info.get("currentPrice", None)
+
+        if market_cap is None and current_price is None:
+            flags.append({
+                "Ticker": ticker,
+                "Metric": "Data Availability",
+                "Value": "N/A",
+                "Flag": "Limited data available - may be a penny stock or thinly traded security",
+                "Severity": "Warning"
+            })
+            continue
+        
+        if market_cap and market_cap < 50_000_000:
+            flags.append({"Ticker": ticker, "Metric": "Market Cap", "Value": f"${market_cap:.0f}", "Flag": "Possible penny stock - data may be unreliable", "Severity": "Warning"})
+        elif market_cap and market_cap < 300_000_000:
+            flags.append({"Ticker": ticker, "Metric": "Market Cap", "Value": f"${market_cap:,.0f}", "Flag": "Small/Micro cap stock - limited liquidity", "Severity": "Caution"})
+        
+        pe = info.get("trailingPE", None)
+        if pe is not None:
+            if pe > 50:
+                flags.append({"Ticker": ticker, "Metric": "P/E Ratio", "Value": f"{pe:.1f}", "Flag": f"P/E of {pe:.1f} is significantly above market average - potentially overvalued", "Severity": "Warning"})
+            elif pe < 0:
+                flags.append({"Ticker": ticker, "Metric": "P/E Ratio", "Value": f"{pe:.1f}", "Flag": "Negative P/E - comapny is currently unprofitable", "Severity": "Warning"})
+
+        peg = info.get("pegRatio", None)
+        if peg is not None and peg > 2:
+            flags.append({"Ticker": ticker, "Metric": "PEG Ratio", "Value": f"{peg:.2f}", "Flag": f"PEG of {peg:.2f} suggests growth may be fully priced in", "Severity": "Caution"})
+
+        high = info.get("fiftyTwoWeekHigh", None)
+        low = info.get("fiftyTwoWeekLow", None)
+        price = info.get("currentPrice", None)
+        if high and price:
+            if price >= high * 0.98:
+                flags.append({"Ticker": ticker, "Metric": "52W High", "Value": f"${price:.2f}", "Flag": f"Trading within 2% of 52-week high (${high:.2f}) - at extreme high", "Severity": "Caution"})
+        if low and price:
+            if price <= low * 1.05:
+                flags.append({"Ticker": ticker, "Metric": "52W Low", "Value": f"${price:.2f}", "Flag": f"Trading within 5% of 52-week low (${low:.2f}) - possible distress", "Severity": "Warning"})
+
+        short_pct = info.get("shortPercentOfFloat", None)
+        if short_pct is not None and short_pct > 0.20:
+            flags.append({"Ticker": ticker, "Metric": "Short % of Float", "Value": f"{short_pct:.1%}", "Flag": f"{short_pct:.1%} of loat is shorted - heavily shorted, elevated risk", "Severity": "Warning"})
+
+        beta = info.get("beta", None)
+        if beta is not None and beta > 2:
+            flags.append({"Ticker": ticker, "Metric": "Beta", "Value": f"{beta:.2f}", "Flag": f"Beta of {beta:.2f} indiccates high volitility relative to market", "Severity": "Caution"})
+    if not flags:
+        flags.append({"Ticker": "All", "Metric": "-", "Value": "-", "Flag": "No major flags detected across all stocks", "Severity": "OK"})
+
+    return pd.DataFrame(flags)
+
 def get_stock_performance(tickers):
     performance_data = {}
     for ticker in tickers:
@@ -126,7 +183,7 @@ def get_stock_performance(tickers):
         print(f"    {ticker}: {total_return:.1f}% return over past year")
     return performance_data
 
-def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, performance_df):
+def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, flags_df, performance_df):
     print("\nExporting to Excel...")
 
     with pd.ExcelWriter("stock_comparison.xlsx", engine="openpyxl") as writer:
@@ -139,12 +196,14 @@ def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financ
 
         analyst_df.to_excel(writer, sheet_name="Analyst Ratings", index=False)
 
+        flags_df.to_excel(writer, sheet_name="Flags", index=False)
+
         workbook = writer.book
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill("solid", fgColor="1F4E79")
         center = Alignment(horizontal="center")
 
-        for sheet_name in ["Key Metrics", "Valuation", "Financials", "Analyst Ratings"]:
+        for sheet_name in ["Key Metrics", "Valuation", "Financials", "Analyst Ratings", "Flags"]:
             ws = workbook[sheet_name]
             for cell in ws[1]:
                 cell.font = header_font
@@ -188,6 +247,24 @@ def export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financ
         plt.close()
         img2 = Image(img_bytes2)
         ws_charts.add_image(img2, "A1")
+
+        ws_flags = workbook["Flags"]
+        for row in ws_flags.iter_rows(min_row=2, max_row=ws_flags.max_row):
+            severity = row[4].value
+            if severity == "Warning":
+                fill = PatternFill("solid", fgColor="FF4C4C")
+                font_color = "FFFFFF"
+            elif severity == "Caution":
+                fill = PatternFill("solid", fgColor="FFA500")
+                font_color = "FFFFFF"
+            elif severity == "OK":
+                fill = PatternFill("solid", fgColor="70AD47")
+                font_color = "FFFFFF"
+            else:
+                continue
+            for cell in row:
+                cell.fill = fill
+                cell.font = Font(color=font_color)
     
     print("Done! File saved as stock_comparison.xlsx")
 
@@ -418,7 +495,10 @@ if mode == "stock":
     print("Fetching Analyst Ratings...")
     analyst_df = get_analyst_ratings(tickers)
 
+    print("Running Flag Analysis...")
+    flags_df = get_flags(tickers, stock_data)
+
     print("Fetching Performance Data...")
     performance_data = get_stock_performance(tickers)
 
-    export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, performance_data)
+    export_stock_excel(tickers, stock_data, key_metrics_df, valuation_df, financials_df, analyst_df, flags_df, performance_data)
